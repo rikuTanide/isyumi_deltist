@@ -35,6 +35,8 @@ part 'src/view_update_strategy.dart';
 
 part 'src/create_index_strategy.dart';
 
+part 'src/index.dart';
+
 enum Code {
   Utf8,
   Ascii,

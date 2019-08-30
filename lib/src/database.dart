@@ -4,12 +4,15 @@ class GlobalState {
   List<TableOrView> tableViews = []; // 全部のテーブルとビュー
   List<Table> tables = []; // あとでRawTableクラスを作る
   List<View> views = [];
-  Map<TableOrView, TableRocksDBPointer> tableRocksDBPointers = {};
+  Map<Table, TableRocksDBPointer> tableRocksDBPointers = {};
+  Map<View, ViewRocksDBPointer> viewRocksDBPointers = {};
   StoreRocksDBPointer storeRocksDBPointer = StoreRocksDBPointer();
 
   // テーブル更新の戦略
   List<RawDataUpdateStrategy> rawDataUpdateStrategies = [];
   List<BytesReadStrategy> bytesReadStrategies = [];
+  List<MaterializeStrategy> materializeStrategies;
+  List<Index> indexes;
 }
 
 class Middleware {
@@ -17,40 +20,50 @@ class Middleware {
   TextStore textStore = TextStore();
   RocksDB rocksDB = RocksDB();
   PhysicalLocationStrategy physicalLocationStrategy =
-      PhysicalLocationStrategy();
+  PhysicalLocationStrategy();
 }
 
 // ここ以外でGlobalStateを書き換えない
 class Actions {
-  void setTables(
-      GlobalState globalState, List<Table> tables, List<View> views) {
+  void setTables(GlobalState globalState, List<Table> tables,
+      List<View> views) {
     var tableViews = <TableOrView>[]..addAll(tables)..addAll(views);
 
     _checkDuplicatedTableName(tableViews);
     _checkPrimaryKeys(tables);
     _checkViewColumnParent(views);
 
+    var indexStrategies = createIndexStrategies(views);
+
     globalState
       ..tables = tables
       ..views = views
       ..tableViews = tableViews
       ..rawDataUpdateStrategies = createRawDataUpdateStrategies(tables)
-      ..bytesReadStrategies = createBytesReadStrategies(tableViews);
+      ..bytesReadStrategies = createBytesReadStrategies(tableViews)
+      ..indexes = indexStrategies.indexes
+      ..materializeStrategies = indexStrategies.materializeStrategies;
   }
 
   // DBの初期化
   void create(String dbPath, GlobalState globalState, Middleware middleware) {
-    middleware.physicalLocationStrategy
-        .createTables(middleware.rocksDB, dbPath, globalState.tables);
+    middleware.physicalLocationStrategy.createTables(middleware.rocksDB, dbPath,
+        globalState.tables, globalState.views, globalState.indexes);
   }
 
   // DBを開きハンドラを登録する
   void open(String dbPath, GlobalState globalState, Middleware middleware) {
-    var results = middleware.physicalLocationStrategy
-        .openTables(middleware.rocksDB, dbPath, globalState.tables);
+    var results = middleware.physicalLocationStrategy.openTables(
+        middleware.rocksDB,
+        dbPath,
+        globalState.tables,
+        globalState.views,
+        globalState.indexes);
+
     globalState
       ..storeRocksDBPointer = results.storeRocksDBPointer
-      ..tableRocksDBPointers = results.tableRocksDBPointers;
+      ..tableRocksDBPointers = results.tableRocksDBPointers
+      ..viewRocksDBPointers = results.viewRocksDBPointers;
   }
 
   void write(GlobalState globalState, Middleware middleware, WritableRow wr) {
@@ -63,17 +76,35 @@ class Actions {
         middleware.stringStore,
         middleware.textStore);
     var keyValue =
-        tableWrite(wr, globalState.rawDataUpdateStrategies, storeTuple);
+    tableWrite(wr, globalState.rawDataUpdateStrategies, storeTuple);
     middleware.physicalLocationStrategy.put(
         middleware.rocksDB,
         globalState.tableRocksDBPointers,
+        globalState.viewRocksDBPointers,
         table,
         keyValue.primaryKeys,
         keyValue.otherColumns);
+    var indexKeyValues =
+    createIndexWriteOperations(wr._table, keyValue, globalState.indexes);
+
+    middleware.physicalLocationStrategy.putIndex(
+        middleware.rocksDB, globalState.tableRocksDBPointers, indexKeyValues);
+
+    writeRecursive(
+      wr._table,
+      keyValue.primaryKeys,
+      keyValue.otherColumns,
+      globalState.materializeStrategies,
+      middleware.rocksDB,
+      middleware.physicalLocationStrategy,
+      globalState.tableRocksDBPointers,
+      globalState.viewRocksDBPointers,
+      globalState.indexes,
+    );
   }
 
-  ReadableRow read(
-      GlobalState globalState, Middleware middleware, ReadKey readKey) {
+  ReadableRow read(GlobalState globalState, Middleware middleware,
+      ReadKey readKey) {
     var table = readKey._table;
 
     _checkDatabaseTableOrView(globalState, table);
@@ -85,17 +116,69 @@ class Actions {
         middleware.stringStore,
         middleware.textStore);
 
-    var key = createReadKey(readKey, globalState.bytesReadStrategies, storeTuple);
-    var valueBytes = middleware.physicalLocationStrategy
-        .get(middleware.rocksDB, globalState.tableRocksDBPointers, table, key);
-    var value = readTable(readKey, valueBytes, globalState.bytesReadStrategies, storeTuple);
+    var key =
+    createReadKey(readKey, globalState.bytesReadStrategies, storeTuple);
+    var valueBytes = middleware.physicalLocationStrategy.get(
+        middleware.rocksDB,
+        globalState.tableRocksDBPointers,
+        globalState.viewRocksDBPointers,
+        table,
+        key);
+    var value = readTable(
+        readKey, valueBytes, globalState.bytesReadStrategies, storeTuple);
 
-    return ReadableRow().._sets = value.._table = table;
+    return ReadableRow()
+      .._sets = value
+      .._table = table;
   }
 
   void close(GlobalState globalState, Middleware middleware) {
     middleware.physicalLocationStrategy.close(middleware.rocksDB,
         globalState.tableRocksDBPointers, globalState.storeRocksDBPointer);
+  }
+
+  void writeRecursive(TableOrView table,
+      Uint8List primaryKeys,
+      Uint8List otherColumns,
+      List<MaterializeStrategy> strategies,
+      RocksDB rocksDB,
+      PhysicalLocationStrategy physicalLocationStrategy,
+      Map<Table, TableRocksDBPointer> tableRocksDBPointers,
+      Map<View, ViewRocksDBPointer> viewRocksDBPointers,
+      List<Index> indexes) {
+    var writeData = changePropagation(
+      table,
+      primaryKeys,
+      otherColumns,
+      strategies,
+      rocksDB,
+      physicalLocationStrategy,
+      tableRocksDBPointers,
+      viewRocksDBPointers,
+    );
+
+    for (var w in writeData) {
+      physicalLocationStrategy.put(rocksDB, tableRocksDBPointers,
+          viewRocksDBPointers, w.view, w.primaryKeys, w.otherColumns);
+      var keyValue = KeyValue()
+        ..primaryKeys = w.primaryKeys
+        ..otherColumns = w.otherColumns;
+      var indexKeyValues =
+      createIndexWriteOperations(w.view, keyValue, indexes);
+      physicalLocationStrategy.putIndex(
+          rocksDB, tableRocksDBPointers, indexKeyValues);
+
+      writeRecursive(
+          w.view,
+          w.primaryKeys,
+          w.otherColumns,
+          strategies,
+          rocksDB,
+          physicalLocationStrategy,
+          tableRocksDBPointers,
+          viewRocksDBPointers,
+          indexes);
+    }
   }
 }
 

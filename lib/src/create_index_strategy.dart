@@ -142,13 +142,17 @@ class IndexTree extends DelegatingMap<Column, IndexTree> {
   }
 }
 
-List<MaterializeStrategy> createIndexStrategies(List<View> views) {
+class IndexStrategies {
+  List<MaterializeStrategy> materializeStrategies;
+  List<Index> indexes;
+}
+
+IndexStrategies createIndexStrategies(List<View> views) {
   var builders = views.map((v) => ViewStrategyBuilder(v));
   var useIndexRequests = getUseIndexRequest(builders);
   var tableIndexTree = createTableTree(useIndexRequests);
   var createIndexRequests = filterEnoughPrimaryKey(tableIndexTree.serialize());
   var indexes = createIndexes(createIndexRequests).toList();
-  print(indexes);
   var viewIndexMappings =
       useIndexRequests.map((r) => findCreatedIndexes(r, indexes));
   var strategies = builders
@@ -160,7 +164,9 @@ List<MaterializeStrategy> createIndexStrategies(List<View> views) {
       results.add(str);
     }
   }
-  return results;
+  return IndexStrategies()
+    ..indexes = indexes
+    ..materializeStrategies = results;
 }
 
 TableIndexTree createTableTree(Iterable<UseIndexRequest> useIndexRequests) {
@@ -489,6 +495,8 @@ class SelectViewMaterializeStrategy implements MaterializeStrategy {
   int otherColumnsLength;
   List<CopyU8int> parentPrimaryKeyToPrimaryKey;
   List<CopyU8int> parentOtherColumnToPrimaryKey;
+  List<CopyU8int> parentPrimaryKeyToOtherColumns;
+  List<CopyU8int> parentOtherColumnToOtherColumns;
 
 // 変更されたのがOtherColumnsだけならTableを変更する
 
@@ -502,6 +510,14 @@ class SelectViewMaterializeStrategy implements MaterializeStrategy {
         .map((c) =>
             "key[${leftPad(c.to)}] = ${parent.tableName}.value[${leftPad(c.from)}]")
         .join("\n");
+    var parentPrimaryKeyToOtherColumnsDescription = parentPrimaryKeyToOtherColumns
+        .map((c) =>
+            "${view.tableName}.value[${leftPad(c.to)}] = ${parent.tableName}.key[${leftPad(c.from)}]")
+        .join("\n");
+    var parentOtherColumnToOtherColumnsDescription = parentOtherColumnToOtherColumns
+        .map((c) =>
+            "${view.tableName}.value[${leftPad(c.to)}] = ${parent.tableName}.value[${leftPad(c.from)}]")
+        .join("\n");
 
     return """
 ${parent.tableName} -> ${view.tableName}
@@ -511,6 +527,8 @@ Valueの長さ: $otherColumnsLength
 $parentPrimaryKeyToPrimaryKeyDescription
 
 $parentOtherColumnToPrimaryKeyDescription
+$parentPrimaryKeyToOtherColumnsDescription
+$parentOtherColumnToOtherColumnsDescription
 """;
   }
 }
@@ -526,7 +544,7 @@ class UnionViewMaterializeStrategyFromSecondaryTable
 
   View view;
 
-  int secondaryTablePrimaryKeyLength;
+  int primaryTablePrimaryKeyLength;
   List<CopyU8int> secondaryTablePrimaryKeyToPrimaryTablePrimaryKey;
   List<CopyU8int> secondaryTableOtherColumnsToPrimaryTablePrimaryKey;
 
@@ -600,7 +618,7 @@ ${primaryTable.tableName}(primary) +
    -> ${view.tableName}
 
 secondary parentに変更があった時、それに対応する行がprimary parentにあるか確認する
-Keyの長さ: $secondaryTablePrimaryKeyLength
+Keyの長さ: $primaryTablePrimaryKeyLength
 $secondaryTablePrimaryKeyToPrimaryTablePrimaryKeyDescription
 
 ${view.tableName}のKeyの長さ$primaryKeyLength
@@ -631,6 +649,8 @@ class UnionViewMaterializeStrategyFromPrimaryTable
   int otherColumnsLength;
   List<CopyU8int> parentPrimaryKeyToPrimaryKey;
   List<CopyU8int> parentOtherColumnToPrimaryKey;
+  List<CopyU8int> parentPrimaryKeyToOtherColumns;
+  List<CopyU8int> parentOtherColumnToOtherColumns;
 
   String toString() {
     var parentPrimaryKeyToPrimaryKeyDescription = parentPrimaryKeyToPrimaryKey
@@ -640,6 +660,14 @@ class UnionViewMaterializeStrategyFromPrimaryTable
     var parentOtherColumnToPrimaryKeyDescription = parentOtherColumnToPrimaryKey
         .map((c) =>
             "${view.tableName}.key[${leftPad(c.to)}] = ${parent.tableName}.value[${leftPad(c.from)}]")
+        .join("\n");
+    var parentPrimaryKeyToOtherColumnsDescription = parentPrimaryKeyToOtherColumns
+        .map((c) =>
+            "${view.tableName}.value[${leftPad(c.to)}] = ${parent.tableName}.key[${leftPad(c.from)}]")
+        .join("\n");
+    var parentOtherColumnToOtherColumnsDescription = parentOtherColumnToOtherColumns
+        .map((c) =>
+            "${view.tableName}.value[${leftPad(c.to)}] = ${parent.tableName}.value[${leftPad(c.from)}]")
         .join("\n");
 
     return """
@@ -651,6 +679,8 @@ ${view.tableName}のValueの長さ$otherColumnsLength
 
 $parentPrimaryKeyToPrimaryKeyDescription
 $parentOtherColumnToPrimaryKeyDescription
+$parentPrimaryKeyToOtherColumnsDescription
+$parentOtherColumnToOtherColumnsDescription
 """;
   }
 }
@@ -731,8 +761,11 @@ class SelectViewStrategyBuilder implements ViewStrategyBuilder {
 
     List<CopyU8int> parentPrimaryKeyToPrimaryKey =
         mapColumnsToCopyStrategy(primaryKeys, view.parent.primaryKeys, mapping);
-
     List<CopyU8int> parentOtherColumnToPrimaryKey = mapColumnsToCopyStrategy(
+        primaryKeys, getOtherColumns(view.parent), mapping);
+    List<CopyU8int> parentPrimaryKeyToOtherColumns = mapColumnsToCopyStrategy(
+        getSortedOtherColumns(view), view.parent.primaryKeys, mapping);
+    List<CopyU8int> parentOtherColumnToOtherColumns = mapColumnsToCopyStrategy(
         getSortedOtherColumns(view), getOtherColumns(view.parent), mapping);
 
     var strategy = SelectViewMaterializeStrategy()
@@ -741,7 +774,9 @@ class SelectViewStrategyBuilder implements ViewStrategyBuilder {
       ..primaryKeyLength = columnsByteLength(view.primaryKeys)
       ..otherColumnsLength = columnsByteLength(getOtherColumns(view))
       ..parentPrimaryKeyToPrimaryKey = parentPrimaryKeyToPrimaryKey
-      ..parentOtherColumnToPrimaryKey = parentOtherColumnToPrimaryKey;
+      ..parentOtherColumnToPrimaryKey = parentOtherColumnToPrimaryKey
+      ..parentPrimaryKeyToOtherColumns = parentPrimaryKeyToOtherColumns
+      ..parentOtherColumnToOtherColumns = parentOtherColumnToOtherColumns;
     return [strategy];
   }
 }
@@ -856,19 +891,27 @@ class UnionViewStrategyBuilder implements ViewStrategyBuilder {
       ViewIndexMapping mapping, TableOrView parent) {
     var primaryKeys = getSortedPrimaryKeys(view);
 
-    var parentPrimaryKeyToPrimaryKey =
-        mapColumnsToCopyStrategy(primaryKeys, parent.primaryKeys, mapping);
     var otherColumns = getSortedOtherColumns(view);
     var parentOtherColumns = getOtherColumns(parent);
+
+    var parentPrimaryKeyToPrimaryKey =
+        mapColumnsToCopyStrategy(primaryKeys, parent.primaryKeys, mapping);
     var parentOtherColumnToPrimaryKey =
+        mapColumnsToCopyStrategy(primaryKeys, parentOtherColumns, mapping);
+    var parentPrimaryKeyToOtherColumns =
+        mapColumnsToCopyStrategy(otherColumns, parent.primaryKeys, mapping);
+    var parentOtherColumnsToOtherColumns =
         mapColumnsToCopyStrategy(otherColumns, parentOtherColumns, mapping);
+
     return UnionViewMaterializeStrategyFromPrimaryTable()
       ..parent = parent
       ..view = view
       ..primaryKeyLength = columnsByteLength(view.primaryKeys)
       ..otherColumnsLength = columnsByteLength(getOtherColumns(view))
       ..parentPrimaryKeyToPrimaryKey = parentPrimaryKeyToPrimaryKey
-      ..parentOtherColumnToPrimaryKey = parentOtherColumnToPrimaryKey;
+      ..parentOtherColumnToPrimaryKey = parentOtherColumnToPrimaryKey
+      ..parentPrimaryKeyToOtherColumns = parentPrimaryKeyToOtherColumns
+      ..parentOtherColumnToOtherColumns = parentOtherColumnsToOtherColumns;
   }
 
   MaterializeStrategy createSecondaryMaterializeStrategyByParent(
@@ -894,7 +937,8 @@ class UnionViewStrategyBuilder implements ViewStrategyBuilder {
       ..parent = parent
       ..view = view
       // セカンダリテーブルに増減があったら、それが主テーブルに存在するかどうかお伺いを立てるためのもの
-      ..secondaryTablePrimaryKeyLength = columnsByteLength(view.primaryKeys)
+      ..primaryTablePrimaryKeyLength =
+          columnsByteLength(primaryTable.primaryKeys)
       ..secondaryTablePrimaryKeyToPrimaryTablePrimaryKey =
           secondaryTablePrimaryKeyToPrimaryTablePrimaryKey
       ..secondaryTableOtherColumnsToPrimaryTablePrimaryKey =
