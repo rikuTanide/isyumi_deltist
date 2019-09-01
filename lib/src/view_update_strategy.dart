@@ -51,6 +51,22 @@ class RawDataUpdateStrategy {
 
   List<SetU8int> primaryKeysSetStrategy;
   List<SetU8int> otherColumnsSetStrategy;
+
+  String toString() {
+    var primaryKeysSetStrategyDescription = primaryKeysSetStrategy
+        .map((pk) => "key[${pk.to}] = ${pk.column.name}[${pk.from}]")
+        .join('\n');
+
+    var otherColumnsSetStrategyDescription = otherColumnsSetStrategy
+        .map((pk) => "value[${pk.to}] = ${pk.column.name}[${pk.from}]")
+        .join('\n');
+    return """
+
+${table.tableName}
+$primaryKeysSetStrategyDescription
+$otherColumnsSetStrategyDescription
+""";
+  }
 }
 
 class BytesReadStrategy {
@@ -58,7 +74,8 @@ class BytesReadStrategy {
 
   int primaryKeyLength;
   List<SetU8int> createPrimaryKeysStrategy;
-  List<CreateColumn> createColumnsFromOtherColumns;
+  List<CreateColumn> readPrimaryKeysStrategy;
+  List<CreateColumn> readOtherColumnsStrategy;
 }
 
 class CreateColumn {
@@ -94,8 +111,6 @@ class SetU8int {
   @override
   int get hashCode => column.hashCode ^ from.hashCode ^ to.hashCode;
 }
-
-
 
 class CopyU8int {
   int from;
@@ -162,11 +177,8 @@ int columnsByteLength(Iterable<Column> columns) {
 }
 
 List<BytesReadStrategy> createBytesReadStrategies(List<TableOrView> tables) {
-  return tables
-      .map((t) => createBytesReadStrategy(t))
-      .toList(growable: false);
+  return tables.map((t) => createBytesReadStrategy(t)).toList(growable: false);
 }
-
 
 BytesReadStrategy createBytesReadStrategy(TableOrView table) {
   var primaryKeys = getSortedPrimaryKeys(table);
@@ -177,7 +189,8 @@ BytesReadStrategy createBytesReadStrategy(TableOrView table) {
     ..primaryKeyLength = primaryKeyLength
     ..createPrimaryKeysStrategy =
         createSetStrategies(primaryKeyLength, primaryKeys)
-    ..createColumnsFromOtherColumns = createReadColumns(otherColumns);
+    ..readPrimaryKeysStrategy = createReadColumns(primaryKeys)
+    ..readOtherColumnsStrategy = createReadColumns(otherColumns);
 }
 
 List<CreateColumn> createReadColumns(List<Column> columns) {

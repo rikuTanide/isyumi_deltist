@@ -170,12 +170,39 @@ class PhysicalLocationStrategy {
     throw "tableでもviewでもないもの";
   }
 
-  void putIndex(
+  Uint8List getByIndex(
       RocksDB rocksdb,
       Map<TableOrView, TableRocksDBPointer> tableRocksDBPointers,
+      Map<View, ViewRocksDBPointer> viewRocksDBPointers,
+      TableOrView table,
+      Index index,
+      Uint8List key) {
+    if (table is Table) {
+      var db = tableRocksDBPointers[table].dbPointer;
+      var columnHandle =
+          tableRocksDBPointers[table].indexPointers[index.indexID];
+      var reference = rocksdb.get(db, columnHandle, key);
+      return get(
+          rocksdb, tableRocksDBPointers, viewRocksDBPointers, table, reference);
+    } else if (table is View) {
+      var db = viewRocksDBPointers[table].dbPointer;
+      var columnHandle =
+          viewRocksDBPointers[table].indexPointers[index.indexID];
+      var reference = rocksdb.get(db, columnHandle, key);
+      return get(
+          rocksdb, tableRocksDBPointers, viewRocksDBPointers, table, reference);
+    }
+    throw "tableでもviewでもないもの";
+  }
+
+  void putIndex(
+      RocksDB rocksdb,
+      Map<Table, TableRocksDBPointer> tableRocksDBPointers,
+      Map<View, ViewRocksDBPointer> viewRocksDBPointers,
       List<IndexKeyValue> writeDatas) {
     var batch = WriteBatchEachTable()
       ..tableRocksDBPointers = tableRocksDBPointers
+      ..viewRocksDBPointers = viewRocksDBPointers
       ..rocksdb = rocksdb;
 
     for (var keyValue in writeDatas) {
@@ -202,27 +229,131 @@ class PhysicalLocationStrategy {
     }
     throw "tableでもviewでもない";
   }
+
+  Map<Uint8List, Uint8List> seekByIndex(
+      RocksDB rocksdb,
+      Map<TableOrView, TableRocksDBPointer> tableRocksDBPointers,
+      Map<View, ViewRocksDBPointer> viewRocksDBPointers,
+      TableOrView table,
+      Index index,
+      Uint8List prefix) {
+    int getIndexPointer() {
+      if (table is Table) {
+        return tableRocksDBPointers[table].indexPointers[index.indexID];
+      } else if (table is View) {
+        return viewRocksDBPointers[table].indexPointers[index.indexID];
+      }
+      throw "tableでもviewでもない";
+    }
+
+    int getDbPointer() {
+      if (table is Table) {
+        return tableRocksDBPointers[table].dbPointer;
+      } else if (table is View) {
+        return viewRocksDBPointers[table].dbPointer;
+      }
+      throw "tableでもviewでもない";
+    }
+
+    var db = getDbPointer();
+    var indexHandle = getIndexPointer();
+
+    return rocksdb.seekAll(db, indexHandle, prefix).map((k, v) => MapEntry(
+        v, get(rocksdb, tableRocksDBPointers, viewRocksDBPointers, table, v)));
+  }
+
+  void delete(
+      RocksDB rocksDB,
+      Map<Table, TableRocksDBPointer> tableRocksDBPointers,
+      Map<View, ViewRocksDBPointer> viewRocksDBPointers,
+      TableOrView table,
+      Uint8List key) {
+    var pointer = DBPointers()
+      ..tableRocksDBPointers = tableRocksDBPointers
+      ..viewRocksDBPointers = viewRocksDBPointers;
+
+    var db = pointer.getDbPointer(table);
+    var columnHandle = pointer.getTablePointer(table);
+    rocksDB.delete(db, columnHandle, key);
+  }
+
+  void deleteIndex(RocksDB rocksDB, DBPointers dbPointers, TableOrView table,
+      List<IndexKeyValue> indexKeyValues) {
+    var db = dbPointers.getDbPointer(table);
+    for (var index in indexKeyValues) {
+      rocksDB.delete(db, dbPointers.getIndexPointer(table, index.index),
+          index.primaryKeys);
+    }
+  }
+}
+
+class DBPointers {
+  Map<Table, TableRocksDBPointer> tableRocksDBPointers;
+  Map<View, ViewRocksDBPointer> viewRocksDBPointers;
+
+  int getDbPointer(TableOrView table) {
+    if (table is Table) {
+      return tableRocksDBPointers[table].dbPointer;
+    } else if (table is View) {
+      return viewRocksDBPointers[table].dbPointer;
+    }
+    throw "tableでもviewでもない";
+  }
+
+  int getTablePointer(TableOrView table) {
+    if (table is Table) {
+      return tableRocksDBPointers[table].tablePointer;
+    } else if (table is View) {
+      return viewRocksDBPointers[table].viewPointer;
+    }
+    throw "tableでもviewでもない";
+  }
+
+  int getIndexPointer(TableOrView table, Index index) {
+    if (table is Table) {
+      return tableRocksDBPointers[table].indexPointers[index.indexID];
+    } else if (table is View) {
+      return viewRocksDBPointers[table].indexPointers[index.indexID];
+    }
+    throw "tableでもviewでもない";
+  }
 }
 
 // 複数のテーブルにWriteBatchする時にテーブルごとに分割してくれる君
 class WriteBatchEachTable {
-  Map<Index, int> _indexBatches = {};
+  Map<Index, int> _tableIndexBatches = {};
+  Map<Index, int> _viewIndexBatches = {};
   Map<Table, TableRocksDBPointer> tableRocksDBPointers;
   Map<View, ViewRocksDBPointer> viewRocksDBPointers;
 
   RocksDB rocksdb;
 
   void writeIndex(Index index, Uint8List key, Uint8List value) {
-    _indexBatches.putIfAbsent(index, () => rocksdb.createWriteBatch());
-    var indexHandle =
-        tableRocksDBPointers[index.table].indexPointers[index.indexID];
-    rocksdb.writeBatch_Put(_indexBatches[index], indexHandle, key, value);
+    var table = index.table;
+    if (table is Table) {
+      _tableIndexBatches.putIfAbsent(index, () => rocksdb.createWriteBatch());
+      var indexHandle =
+          tableRocksDBPointers[table].indexPointers[index.indexID];
+      rocksdb.writeBatch_Put(
+          _tableIndexBatches[index], indexHandle, key, value);
+    } else if (table is View) {
+      _viewIndexBatches.putIfAbsent(index, () => rocksdb.createWriteBatch());
+      var indexHandle = viewRocksDBPointers[table].indexPointers[index.indexID];
+      rocksdb.writeBatch_Put(_viewIndexBatches[index], indexHandle, key, value);
+    } else {
+      throw "viewでもtableでもない";
+    }
   }
 
   void writeAll() {
-    for (var index in _indexBatches.keys) {
-      var batch = _indexBatches[index];
+    for (var index in _tableIndexBatches.keys) {
+      var batch = _tableIndexBatches[index];
       var dbPointer = tableRocksDBPointers[index.table].dbPointer;
+      rocksdb.write(dbPointer, batch);
+    }
+    for (var index in _viewIndexBatches.keys) {
+      var batch = _viewIndexBatches[index];
+      var dbPointer = viewRocksDBPointers[index.table].dbPointer;
       rocksdb.write(dbPointer, batch);
     }
   }

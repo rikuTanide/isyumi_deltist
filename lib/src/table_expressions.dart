@@ -32,6 +32,13 @@ dynamic u8IntToDartValue(
     return u8ListToString(storeTuple, key.code, value);
   } else if (key is TextColumn) {
     return u8ListToText(storeTuple, value);
+    //ここからViewColumn
+  } else if (key is SelectColumn) {
+    return u8IntToDartValue(storeTuple, key.from, value);
+  } else if (key is JoinColumn) {
+    return u8IntToDartValue(storeTuple, key.left, value);
+  } else if (key is UnionColumn) {
+    return u8IntToDartValue(storeTuple, key.left, value);
   }
 
   throw "知らない型のカラム";

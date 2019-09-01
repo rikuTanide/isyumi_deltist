@@ -37,6 +37,8 @@ part 'src/create_index_strategy.dart';
 
 part 'src/index.dart';
 
+part 'src/delete.dart';
+
 enum Code {
   Utf8,
   Ascii,

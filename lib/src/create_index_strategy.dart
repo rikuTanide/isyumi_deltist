@@ -5,7 +5,7 @@ enum GetOrSeek {
   seek,
 }
 
-enum UseIndexReason { left, right, own, parent }
+enum UseIndexReason { left, right, ownFromLeft, ownFromRight, parent }
 
 class CreateIndexRequest {
   TableOrView table;
@@ -395,6 +395,8 @@ class InnerJoinMaterializeStrategy implements MaterializeStrategy {
   int ownIndexLength; // Seekの場合があるからIndexの長さとは限らない
   List<CopyU8int> parentPrimaryKeyToOwnIndex;
   List<CopyU8int> parentOtherColumnsToOwnIndex;
+
+  // ここはparentじゃなくてown？
   GetOrSeek parentIndexGetOrSeek;
 
   String toString() {
@@ -1038,13 +1040,16 @@ class InnerJoinStrategyBuilder implements ViewStrategyBuilder {
     var left = getJoinLeftColumnsRecursive(view.on, Set());
 
     // 自分を消したりアップデートしたりするためのカラム
-    var ownIndex = Set<Column>.from(getJoinColumnsRecursive(view.on, Set()));
+    // 元テーブルのprimary keyが自分のテーブルの何か？
+    var ownFromLeft =
+        Set<Column>.from(getLeftParentToOwnColumns(view.leftTable.primaryKeys));
+    var ownFromRight = Set<Column>.from(
+        getRightParentToOwnColumns(view.rightTable.primaryKeys));
 
     var rightToOwn = getRightToOwns();
     var ownToRight = mapReverse(rightToOwn);
     var leftToOwn = getLeftToOwns();
     var ownToLeft = mapReverse(leftToOwn);
-    var ownToOwn = Map.fromEntries(view.primaryKeys.map((c) => MapEntry(c, c)));
 
     return <UseIndexRequest>[
       UseIndexRequest()
@@ -1063,9 +1068,9 @@ class InnerJoinStrategyBuilder implements ViewStrategyBuilder {
         ..ownToParent = ownToLeft,
       UseIndexRequest()
         ..table = view
-        ..columns = ownIndex
+        ..columns = ownFromLeft
         ..consumer = view
-        ..reason = UseIndexReason.own
+        ..reason = UseIndexReason.ownFromLeft
         ..ownToParent = ownToOwn
         ..parentToOwn = ownToOwn,
     ];
@@ -1225,7 +1230,7 @@ class InnerJoinStrategyBuilder implements ViewStrategyBuilder {
 
       // 左が変わった時に自分の行を特定するため
       ..ownIndex = ownMapping.determinedIndex
-      ..ownIndexLength = columnsByteLength(view.primaryKeys)
+      ..ownIndexLength = columnsByteLength(ownMapping.requestIndex)
       ..parentPrimaryKeyToOwnIndex =
           mapColumnsToCopyStrategy(ownMapping.requestIndex, view.leftTable.primaryKeys, parentMapping)
       ..parentOtherColumnsToOwnIndex = mapColumnsToCopyStrategy(ownMapping.requestIndex, getOtherColumns(view.leftTable), parentMapping)
@@ -1285,7 +1290,7 @@ class InnerJoinStrategyBuilder implements ViewStrategyBuilder {
 
       // 左が変わった時に自分の行を特定するため
       ..ownIndex = ownMapping.determinedIndex
-      ..ownIndexLength = columnsByteLength(view.primaryKeys)
+      ..ownIndexLength = columnsByteLength(ownMapping.requestIndex)
       ..parentPrimaryKeyToOwnIndex = mapColumnsToCopyStrategy(
           ownMapping.requestIndex, view.rightTable.primaryKeys, parentMapping)
       ..parentOtherColumnsToOwnIndex = mapColumnsToCopyStrategy(ownMapping.requestIndex, getOtherColumns(view.rightTable), parentMapping)
@@ -1316,5 +1321,35 @@ class InnerJoinStrategyBuilder implements ViewStrategyBuilder {
       }
     }
     return results;
+  }
+
+  Iterable<Column> getLeftParentToOwnColumns(Set<Column> columns) {
+    return columns.map((c) => getLeftParentToOwnColumn(c));
+  }
+
+  Column getLeftParentToOwnColumn(Column column) {
+    return view.columns.firstWhere((c) {
+      if (c is JoinColumn) {
+        return c.left == column;
+      } else if (c is SelectColumn && c.view == view.leftTable) {
+        return c.from == column;
+      }
+      return false;
+    });
+  }
+
+  Iterable<Column> getRightParentToOwnColumns(Set<Column> columns) {
+    return columns.map((c) => getRightParentToOwnColumn(c));
+  }
+
+  Column getRightParentToOwnColumn(Column column) {
+    return view.columns.firstWhere((c) {
+      if (c is JoinColumn) {
+        return c.right == column;
+      } else if (c is SelectColumn && c.view == view.rightTable) {
+        return c.from == column;
+      }
+      return false;
+    });
   }
 }

@@ -22,15 +22,15 @@ class ReadKey {
   }
 }
 
-Uint8List createReadKey(ReadKey readKey,
+Uint8List createReadKey(TableOrView table, Map<Column, dynamic> sets,
     List<BytesReadStrategy> bytesReadStrategies, StoreTuple storeTuple) {
   for (var strategy in bytesReadStrategies) {
-    if (strategy.table != readKey._table) {
+    if (strategy.table != table) {
       continue;
     }
     var byteValues = <Column, Uint8List>{};
-    for (var column in readKey._sets.keys) {
-      dynamic value = readKey._sets[column];
+    for (var column in sets.keys) {
+      dynamic value = sets[column];
       var byteValue = dartValueToU8int(storeTuple, column, value);
       byteValues[column] = byteValue;
     }
@@ -54,7 +54,7 @@ Map<Column, dynamic> readTable(ReadKey readKey, Uint8List record,
       continue;
     }
     var byteValues = <Column, dynamic>{};
-    for (var column in strategy.createColumnsFromOtherColumns) {
+    for (var column in strategy.readOtherColumnsStrategy) {
       var byteValue = Uint8List(column.length);
       for (var copy in column.copies) {
         byteValue[copy.to] = record[copy.from];
@@ -70,6 +70,46 @@ Map<Column, dynamic> readTable(ReadKey readKey, Uint8List record,
     }
 
     return byteValues;
+  }
+
+  throw "読み込み戦略がないため読み込めない";
+}
+
+// こっちはKeyとValueを両方変換する
+// seek向け
+Map<Column, dynamic> readTableRecord(
+    TableOrView table,
+    Uint8List keyRecord,
+    Uint8List valueRecord,
+    List<BytesReadStrategy> bytesReadStrategies,
+    StoreTuple storeTuple) {
+  for (var strategy in bytesReadStrategies) {
+    if (strategy.table != table) {
+      continue;
+    }
+    var meaningValues = <Column, dynamic>{};
+    for (var column in strategy.readOtherColumnsStrategy) {
+      var byteValue = Uint8List(column.length);
+      for (var copy in column.copies) {
+        byteValue[copy.to] = valueRecord[copy.from];
+      }
+
+      dynamic value = u8IntToDartValue(storeTuple, column.column, byteValue);
+
+      meaningValues[column.column] = value;
+    }
+
+    for (var column in strategy.readPrimaryKeysStrategy) {
+      var byteKey = Uint8List(column.length);
+      for (var copy in column.copies) {
+        byteKey[copy.to] = keyRecord[copy.from];
+      }
+
+      dynamic value = u8IntToDartValue(storeTuple, column.column, byteKey);
+
+      meaningValues[column.column] = value;
+    }
+    return meaningValues;
   }
 
   throw "読み込み戦略がないため読み込めない";

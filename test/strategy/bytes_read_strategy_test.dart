@@ -8,15 +8,15 @@ void main() {
     var strategy = createBytesReadStrategy(tableA);
 
     expect(strategy.table, equals(tableA));
-    expect(strategy.createColumnsFromOtherColumns.length, equals(3));
-    expect(strategy.createColumnsFromOtherColumns[0].length, equals(8));
+    expect(strategy.readOtherColumnsStrategy.length, equals(3));
+    expect(strategy.readOtherColumnsStrategy[0].length, equals(8));
     expect(
-        strategy.createColumnsFromOtherColumns[0].copies[0],
+        strategy.readOtherColumnsStrategy[0].copies[0],
         equals(CopyU8int()
           ..to = 0
           ..from = 0));
     expect(
-        strategy.createColumnsFromOtherColumns[1].copies[0],
+        strategy.readOtherColumnsStrategy[1].copies[0],
         equals(CopyU8int()
           ..to = 0
           ..from = 8));
