@@ -1044,9 +1044,6 @@ class InnerJoinStrategyBuilder implements ViewStrategyBuilder {
     var ownFromLeft = Set<Column>.from(getLeftParentToOwnColumns());
     var ownFromRight = Set<Column>.from(getRightParentToOwnColumns());
 
-    print(ownFromLeft);
-    print(ownFromRight);
-
     var rightToOwn = getRightToOwns();
     var ownToRight = mapReverse(rightToOwn);
     var leftToOwn = getLeftToOwns();

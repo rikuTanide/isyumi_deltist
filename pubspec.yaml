@@ -9,7 +9,7 @@ environment:
 
 dependencies:
   rocksdb_interop:
-    path: /home/riku/WebstormProjects/rocksdb_interop
+    git: git://github.com/rikuTanide/rocksdb_interop.git
   crypto: ^2.1.1+1
   quiver: ^2.0.5
 

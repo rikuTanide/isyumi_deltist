@@ -34,12 +34,6 @@ class Actions {
     _checkViewColumnParent(views);
 
     var indexStrategies = createIndexStrategies(views);
-//    for(var i in createRawDataUpdateStrategies(tables).where((i)=>i.table.tableName == "Tweets")){
-//      print(i);
-//    }
-//    for(var i in indexStrategies.materializeStrategies.where((i)=>i.parent.tableName == "Tweets")) {
-//      print(i);
-//    }
 
     globalState
       ..tables = tables
@@ -587,5 +581,17 @@ class Reference {
     return ReadableRow()
       .._sets = value
       .._table = _view;
+  }
+
+  String toString() {
+    var row = this.row();
+    var keys = _view.primaryKeys
+        .map<dynamic>((k) => "${k.name}=${row._sets[k]}")
+        .join(",");
+    var values = getOtherColumns(_view)
+        .map<dynamic>((k) => "${k.name}=${row._sets[k]}")
+        .join(",");
+    var pod = putOrDelete == PutOrDelete.delete ? "delete" : "put";
+    return "$pod ${_view.tableName} ${keys} ${values}";
   }
 }

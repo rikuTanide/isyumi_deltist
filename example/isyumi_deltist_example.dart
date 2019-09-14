@@ -64,6 +64,9 @@ void main() {
   var dr = DeleteRow(tweets)..set(tweets.tweetID, 1000000 + 1);
   var ref2 = db.delete(dr);
 
+  for (var ref in ref2.map[followeeTweets]){
+    print(ref);
+  }
 
 }
 
