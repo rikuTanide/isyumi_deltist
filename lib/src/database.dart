@@ -34,12 +34,12 @@ class Actions {
     _checkViewColumnParent(views);
 
     var indexStrategies = createIndexStrategies(views);
-    for(var i in createRawDataUpdateStrategies(tables).where((i)=>i.table.tableName == "Tweets")){
-      print(i);
-    }
-    for(var i in indexStrategies.materializeStrategies.where((i)=>i.parent.tableName == "Tweets")) {
-      print(i);
-    }
+//    for(var i in createRawDataUpdateStrategies(tables).where((i)=>i.table.tableName == "Tweets")){
+//      print(i);
+//    }
+//    for(var i in indexStrategies.materializeStrategies.where((i)=>i.parent.tableName == "Tweets")) {
+//      print(i);
+//    }
 
     globalState
       ..tables = tables

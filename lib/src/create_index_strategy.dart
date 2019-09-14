@@ -1041,10 +1041,11 @@ class InnerJoinStrategyBuilder implements ViewStrategyBuilder {
 
     // 自分を消したりアップデートしたりするためのカラム
     // 元テーブルのprimary keyが自分のテーブルの何か？
-    var ownFromLeft =
-        Set<Column>.from(getLeftParentToOwnColumns(view.leftTable.primaryKeys));
-    var ownFromRight = Set<Column>.from(
-        getRightParentToOwnColumns(view.rightTable.primaryKeys));
+    var ownFromLeft = Set<Column>.from(getLeftParentToOwnColumns());
+    var ownFromRight = Set<Column>.from(getRightParentToOwnColumns());
+
+    print(ownFromLeft);
+    print(ownFromRight);
 
     var rightToOwn = getRightToOwns();
     var ownToRight = mapReverse(rightToOwn);
@@ -1071,8 +1072,15 @@ class InnerJoinStrategyBuilder implements ViewStrategyBuilder {
         ..columns = ownFromLeft
         ..consumer = view
         ..reason = UseIndexReason.ownFromLeft
-        ..ownToParent = ownToOwn
-        ..parentToOwn = ownToOwn,
+        ..parentToOwn = leftToOwn
+        ..ownToParent = ownToLeft,
+      UseIndexRequest()
+        ..table = view
+        ..columns = ownFromRight
+        ..consumer = view
+        ..reason = UseIndexReason.ownFromRight
+        ..parentToOwn = rightToOwn
+        ..ownToParent = ownToRight,
     ];
   }
 
@@ -1182,7 +1190,7 @@ class InnerJoinStrategyBuilder implements ViewStrategyBuilder {
     var parentMapping = viewIndexMappings.firstWhere(
         (v) => v.consumer == view && v.reason == UseIndexReason.left);
     var ownMapping = viewIndexMappings.firstWhere(
-        (v) => v.consumer == view && v.reason == UseIndexReason.own);
+        (v) => v.consumer == view && v.reason == UseIndexReason.ownFromLeft);
 
     var sortedPrimaryKeys = getSortedPrimaryKeys(view);
     var sortedOtherColumns = getSortedOtherColumns(view);
@@ -1244,7 +1252,7 @@ class InnerJoinStrategyBuilder implements ViewStrategyBuilder {
     var parentMapping = viewIndexMappings.firstWhere(
         (v) => v.consumer == view && v.reason == UseIndexReason.right);
     var ownMapping = viewIndexMappings.firstWhere(
-        (v) => v.consumer == view && v.reason == UseIndexReason.own);
+        (v) => v.consumer == view && v.reason == UseIndexReason.ownFromRight);
 
     var sortedPrimaryKeys = getSortedPrimaryKeys(view);
     var sortedOtherColumns = getSortedOtherColumns(view);
@@ -1323,33 +1331,39 @@ class InnerJoinStrategyBuilder implements ViewStrategyBuilder {
     return results;
   }
 
-  Iterable<Column> getLeftParentToOwnColumns(Set<Column> columns) {
-    return columns.map((c) => getLeftParentToOwnColumn(c));
-  }
-
-  Column getLeftParentToOwnColumn(Column column) {
-    return view.columns.firstWhere((c) {
-      if (c is JoinColumn) {
-        return c.left == column;
-      } else if (c is SelectColumn && c.view == view.leftTable) {
-        return c.from == column;
+  Iterable<Column> getLeftParentToOwnColumns() {
+    var columns = <Column>{};
+    for (var parentPrimaryKey in this.view.leftTable.primaryKeys) {
+      for (var ownColumn in this.view.columns) {
+        if (ownColumn is JoinColumn) {
+          if (ownColumn.left == parentPrimaryKey) {
+            columns.add(ownColumn);
+          }
+        } else if (ownColumn is SelectColumn) {
+          if (ownColumn.from == parentPrimaryKey) {
+            columns.add(ownColumn);
+          }
+        }
       }
-      return false;
-    });
+    }
+    return columns;
   }
 
-  Iterable<Column> getRightParentToOwnColumns(Set<Column> columns) {
-    return columns.map((c) => getRightParentToOwnColumn(c));
-  }
-
-  Column getRightParentToOwnColumn(Column column) {
-    return view.columns.firstWhere((c) {
-      if (c is JoinColumn) {
-        return c.right == column;
-      } else if (c is SelectColumn && c.view == view.rightTable) {
-        return c.from == column;
+  Iterable<Column> getRightParentToOwnColumns() {
+    var columns = <Column>{};
+    for (var parentPrimaryKey in this.view.rightTable.primaryKeys) {
+      for (var ownColumn in this.view.columns) {
+        if (ownColumn is JoinColumn) {
+          if (ownColumn.right == parentPrimaryKey) {
+            columns.add(ownColumn);
+          }
+        } else if (ownColumn is SelectColumn) {
+          if (ownColumn.from == parentPrimaryKey) {
+            columns.add(ownColumn);
+          }
+        }
       }
-      return false;
-    });
+    }
+    return columns;
   }
 }

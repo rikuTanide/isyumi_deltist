@@ -61,22 +61,10 @@ void main() {
     ..set(tweets.content, "こんにちは");
   var ref = db.write(wr);
 
-  for (var tweetRef in ref.map[followeeTweets]) {
-    var row = tweetRef.row();
-  }
-
   var dr = DeleteRow(tweets)..set(tweets.tweetID, 1000000 + 1);
   var ref2 = db.delete(dr);
-//  for (var tweetRef in ref2.map[followeeTweets]) {
-//    var row = tweetRef.row();
-//    print([
-//      "readerID: ${row.get(followeeTweets.readerID)}",
-//      "tweetID: ${row.get(followeeTweets.tweetID)}",
-//      "ownerID: ${row.get(followeeTweets.ownerID)}",
-//      "timestamp: ${row.get(followeeTweets.timestamp)}",
-//      "content: ${row.get(followeeTweets.content)}",
-//    ]);
-//  }
+
+
 }
 
 class Users extends Table {

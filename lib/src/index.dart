@@ -526,15 +526,20 @@ Iterable<ViewKeyValue> deleteInnerJoinViewMaterialize(
     RocksDB rocksDB,
     Map<Table, TableRocksDBPointer> tableRocksDBPointers,
     Map<View, ViewRocksDBPointer> viewRocksDBPointers) {
+  print(strategy);
   var primaryKey = Uint8List(strategy.ownIndexLength);
+
   for (var copy in strategy.parentPrimaryKeyToOwnIndex) {
+    print([copy.to, '->' , copy.from] );
     primaryKey[copy.to] = key[copy.from];
   }
 
   for (var copy in strategy.parentOtherColumnsToOwnIndex) {
+    print([copy.to, '->' , copy.from] );
+
     primaryKey[copy.to] = value[copy.from];
   }
-
+exit(1);
   Uint8List getOrIndexGet(Uint8List primaryKey) {
     var ownIndex = strategy.ownIndex;
     if (ownIndex is UsePrimaryKey) {
