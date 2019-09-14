@@ -1,7 +1,9 @@
 import 'package:isyumi_deltist/isyumi_deltist.dart';
 import 'dart:io';
 import 'dart:math';
-
+import 'dart:convert';
+import 'dart:collection';
+import 'dart:async';
 void main() {
   print("start");
   var users = Users();
@@ -31,43 +33,56 @@ void main() {
     ..open(dbPath);
   print("on open");
 
-  for (var i = 0; i < 10; i++) {
-    var wr = WritableRow(users)..set(users.userID, i)..set(users.name, "name");
-    db.write(wr);
-    for (var tid = 0; tid < 10; tid++) {
-      var wr2 = WritableRow(tweets)
-        ..set(tweets.tweetID, i * 1000 + tid)
-        ..set(tweets.userID, i)
-        ..set(tweets.timestamp, DateTime.now())
-        ..set(tweets.content, "こんにちは");
-      db.write(wr2);
-    }
-  }
+  Process.start("node", ["example/bin/main.js"]).then((ps) {
+    print("ooo");
+    ps.stderr.listen((line) {
+      print(["inline", Utf8Decoder().convert(line)]);
+    });
 
-  for (var x = 0; x < 10; x++) {
-    for (var y = 0; y < 10; y++) {
-      if (x == y) {
-        continue;
+    ps.stdout.listen((line) {
+      print("pop");
+      var lineStr = Utf8Decoder().convert(line).trim();
+      if(lineStr == ""){
+        return;
       }
-      var w3 = WritableRow(follows)..set(follows.from, x)..set(follows.to, y);
-      db.write(w3);
-    }
-  }
+      print(["linein",lineStr]);
+      var json = JsonDecoder().convert(lineStr)
+          as Map<String, dynamic>;
+      //{"collection":"users","type":"added","value":{"name":"1さん","userID":"user1"}}
+      var collection = json["collection"] as String;
+      var type = json["type"] as String;
+      dynamic value = json["value"];
 
-  var wr = WritableRow(tweets)
-    ..set(tweets.tweetID, 1000000 + 1)
-    ..set(tweets.userID, 1)
-    ..set(tweets.timestamp, DateTime.now())
-    ..set(tweets.content, "こんにちは");
-  var ref = db.write(wr);
-
-  var dr = DeleteRow(tweets)..set(tweets.tweetID, 1000000 + 1);
-  var ref2 = db.delete(dr);
-
-  for (var ref in ref2.map[followeeTweets]){
-    print(ref);
-  }
-
+      if (collection == "users") {
+        var userID = value["userID"] as int;
+        var name = value["name"] as String;
+        var wr = WritableRow(users)
+          ..set(users.userID, userID)
+          ..set(users.name, name);
+        db.write(wr);
+      } else if (collection == "tweets") {
+        var tweetID = value["tweetID"] as int;
+        var userID = value["userID"] as int;
+        var timestamp = DateTime.fromMillisecondsSinceEpoch(
+            (value["timestap"]["seconds"] as int) * 100);
+        var text = value["text"] as String;
+        var wr2 = WritableRow(tweets)
+          ..set(tweets.tweetID, tweetID)
+          ..set(tweets.userID, userID)
+          ..set(tweets.timestamp, timestamp)
+          ..set(tweets.content, text);
+        db.write(wr2);
+      } else if (collection == "follows") {
+        var from = value["from"] as int;
+        var to = value["to"] as int;
+        var w3 = WritableRow(follows)
+          ..set(follows.from, from)
+          ..set(follows.to, to);
+        db.write(w3);
+      }
+      print(["end" , lineStr]);
+    });
+  });
 }
 
 class Users extends Table {
@@ -89,7 +104,7 @@ class Tweets extends Table {
 
   final DateTimeColumn timestamp = DateTimeColumn("timestamp");
 
-  final TextColumn content = TextColumn("name");
+  final TextColumn content = TextColumn("text");
 
   Set<Column> get columns => {tweetID, userID, timestamp, content};
 

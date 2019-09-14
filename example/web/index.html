@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Example</title>
+    <style>
+        .flex{
+            padding: 2.5% 0;
+            display: flex;
+            flex-direction: row;
+        }
+        .flex > *{
+            min-width: 8%;
+            background: #fff;
+            text-align: center;
+        }
+        .box{
+            border: black 1px solid;
+        }
+    </style>
+</head>
+<body class="flex">
+
+<div class="box">
+    <h2>1さんのタイムライン</h2>
+
+    <div id="timeline"></div>
+    <select id="follow-to"></select><button id="follow">フォロー</button>
+
+</div>
+<div class="box">
+    <h2>管理画面</h2>
+    <button id="delete-all">全件削除</button>
+    <button id="insert-initialize">初期データ挿入</button>
+
+    <div>
+        <h3>ユーザー一覧</h3>
+        <div id="users"></div>
+    </div>
+    <div>
+        <h3>ツイート一覧</h3>
+        <div id="tweets"></div>
+    </div>
+    <div>
+        <h3>フォロー一覧</h3>
+        <div id="follows"></div>
+
+
+    </div>
+</div>
+<script src="https://www.gstatic.com/firebasejs/6.6.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/6.6.1/firebase-firestore.js"></script>
+
+
+<script src="index.dart.js"></script>
+</body>
+</html>
