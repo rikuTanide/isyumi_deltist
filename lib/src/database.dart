@@ -555,7 +555,7 @@ class ChangeDataList {
       .._view = view
       .._key = key
       .._value = value
-      ..putOrDelete;
+      ..putOrDelete = putOrDelete;
     map[view].add(ref);
   }
 }
