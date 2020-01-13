@@ -21,7 +21,7 @@ sudo apt install dart
 
 export PATH=/usr/lib/dart/bin:$PATH # これは.bashrcにも書いておこう
 ```
-
+# DBを作る
 ## テーブル定義
 
 - カラムの型と名前、長さなどを指定
